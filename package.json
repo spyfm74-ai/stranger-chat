@@ -1,0 +1,11 @@
+{
+  "name": "stranger-backend",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "dependencies": {
+    "express": "^4.19.2",
+    "geoip-lite": "^1.4.10",
+    "socket.io": "^4.7.5"
+  }
+}
