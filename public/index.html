@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="si"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Stranger Chat</title>
+<style>
+:root{--bg:#fff;--fg:#1a1a1f;--mut:#6b6b76;--card:#f2f2f6;--acc:#5b5bf0;--bd:#e0e0e8}
+@media (prefers-color-scheme:dark){:root{--bg:#15151a;--fg:#f0f0f5;--mut:#9a9aa6;--card:#24242c;--bd:#33333d}}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,sans-serif;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom);box-sizing:border-box}
+header{padding:10px 16px;display:flex;justify-content:space-between;border-bottom:1px solid var(--bd)}
+.mut{color:var(--mut);font-size:13px}
+.center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px;text-align:center}
+button{font:inherit;border:0;border-radius:12px;padding:11px 18px;background:var(--acc);color:#fff;cursor:pointer}
+button.sec{background:var(--card);color:var(--fg);padding:7px 12px;font-size:13px}
+input[type=text],select{font:inherit;padding:10px 14px;border-radius:12px;border:1px solid var(--bd);background:var(--bg);color:var(--fg);width:100%;max-width:320px;box-sizing:border-box}
+.spin{width:36px;height:36px;border:4px solid var(--card);border-top-color:var(--acc);border-radius:50%;animation:s 1s linear infinite}
+@keyframes s{to{transform:rotate(360deg)}}
+#chat{flex:1;flex-direction:column;min-height:0}
+#vid{position:relative;background:#000;height:38%;min-height:160px;flex:none}
+#rv{width:100%;height:100%;object-fit:cover}
+#lv{position:absolute;right:8px;bottom:8px;width:92px;height:122px;object-fit:cover;border-radius:10px;border:2px solid #fff;background:#222;transform:scaleX(-1)}
+#msgs{flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:6px}
+.b{max-width:78%;padding:8px 12px;border-radius:16px;background:var(--card);align-self:flex-start;word-wrap:break-word;white-space:pre-wrap}
+.b.me{background:var(--acc);color:#fff;align-self:flex-end}
+.sys{align-self:center;color:var(--mut);font-size:13px;text-align:center}
+.bar{display:flex;gap:8px;padding:10px;border-top:1px solid var(--bd)}
+.bar input{flex:1;border-radius:20px;max-width:none}
+.tools{display:flex;gap:6px;padding:8px 10px;flex-wrap:wrap}
+.hide{display:none!important}
+</style></head><body>
+<header><b>💬 Stranger Chat</b><span class="mut" id="online"></span></header>
+<div class="center" id="home">
+  <div style="font-size:44px">🎥</div>
+  <b>Video + Text chat</b>
+  <input type="text" id="it" placeholder="Interests (gaming, music, ...)">
+  <label class="mut"><input type="checkbox" id="age"> මම 18+ සහ නීති වලට එකඟයි</label>
+  <button id="start">Start</button>
+  <div class="mut" id="note"></div>
+</div>
+<div class="center hide" id="wait"><div class="spin"></div><div>කෙනෙක් හොයනවා…</div><button class="sec" id="cancel">Cancel</button></div>
+<div class="hide" id="chat">
+  <div id="vid" class="hide"><video id="rv" autoplay playsinline></video><video id="lv" autoplay playsinline muted></video></div>
+  <div class="tools"><button class="sec" id="next">Next ⏭</button><button class="sec" id="mic">🎤</button><button class="sec" id="cam">📷</button><button class="sec" id="report">Report 🚩</button><button class="sec" id="stop">Stop</button></div>
+  <div id="msgs"></div>
+  <div class="bar"><input type="text" id="inp" maxlength="500" placeholder="Message…" autocomplete="off"><button id="send">යවන්න</button></div>
+</div>
+<script src="/socket.io/socket.io.js"></script>
+<script>
+var $=function(i){return document.getElementById(i)};
+var socket=io(),pc=null,local=null,noCam=false,ice=[{urls:'stun:stun.l.google.com:19302'}],pend=[],busy=false;
+fetch('/turn').then(function(r){return r.json()}).then(function(j){ice=j.iceServers}).catch(function(){});
+function show(id){['home','wait','chat'].forEach(function(x){var e=$(x);if(x===id){e.classList.remove('hide');e.style.display='flex'}else{e.classList.add('hide');e.style.display=''}})}
+function sys(t){var d=document.createElement('div');d.className='sys';d.textContent=t;$('msgs').appendChild(d);sc()}
+function sc(){var m=$('msgs');m.scrollTop=m.scrollHeight}
+function bubble(t,me){var d=document.createElement('div');d.className='b'+(me?' me':'');d.textContent=t;$('msgs').appendChild(d);sc()}
+function mkpc(){
+  if(pc)return;
+  pc=new RTCPeerConnection({iceServers:ice});
+  pc.onicecandidate=function(e){if(e.candidate)socket.emit('signal',{ice:e.candidate})};
+  pc.ontrack=function(e){$('rv').srcObject=e.streams[0]||new MediaStream([e.track]);$('vid').classList.remove('hide')};
+  if(local)local.getTracks().forEach(function(t){pc.addTrack(t,local)});
+  else{pc.addTransceiver('audio',{direction:'recvonly'});pc.addTransceiver('video',{direction:'recvonly'})}
+}
+function closePc(){if(pc){try{pc.close()}catch(e){}pc=null}pend=[];$('rv').srcObject=null}
+async function flush(){while(pend.length)await pc.addIceCandidate(pend.shift()).catch(function(){})}
+function join(){
+  var it=$('it').value.toLowerCase().split(',').map(function(s){return s.trim()}).filter(Boolean);
+  socket.emit('join_queue',{adult:true,interests:it});
+  show('wait');
+}
+async function start(){
+  if(!$('age').checked){alert('18+ ද කියලා tick කරන්න.');return}
+  if(!local&&!noCam){
+    try{local=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'},audio:true})}
+    catch(e){noCam=true;$('note').textContent='Camera/mic නැහැ, text විතරයි (HTTPS ඕනේ)'}
+  }
+  join();
+}
+function reset(){closePc();$('msgs').innerHTML=''}
+socket.on('online',function(n){$('online').textContent=n+' online'});
+socket.on('hello',function(d){$('online').textContent=d.online+' online'});
+socket.on('waiting',function(){show('wait')});
+socket.on('matched',async function(d){
+  reset();show('chat');
+  if(local){$('lv').srcObject=local;$('vid').classList.remove('hide')}
+  sys('Connect වුණා ('+d.country+')'+(d.common.length?' • common: '+d.common.join(', '):'')+'. Hi කියන්න 👋');
+  if(d.initiator){mkpc();var o=await pc.createOffer();await pc.setLocalDescription(o);socket.emit('signal',{sdp:pc.localDescription})}
+});
+socket.on('signal',async function(d){
+  try{
+    if(d.sdp){
+      mkpc();await pc.setRemoteDescription(d.sdp);await flush();
+      if(d.sdp.type==='offer'){var a=await pc.createAnswer();await pc.setLocalDescription(a);socket.emit('signal',{sdp:pc.localDescription})}
+    }else if(d.ice){
+      if(pc&&pc.remoteDescription)await pc.addIceCandidate(d.ice).catch(function(){});else pend.push(d.ice)
+    }
+  }catch(e){}
+});
+socket.on('message',function(t){bubble(t,false)});
+socket.on('partner_left',function(){closePc();sys('Stranger ගියා. Next එබුවොත් අලුත් කෙනෙක්.')});
+socket.on('error_msg',function(t){sys(t)});
+socket.on('blocked',function(){document.body.innerHTML='<div class="center"><b>🇱🇰 මේ app එක ශ්‍රී ලංකාවේ අයට විතරයි.</b></div>'});
+socket.on('banned',function(){alert('ඔයාව ටික වෙලාවකට ban කරලා.');location.reload()});
+$('start').onclick=start;
+$('cancel').onclick=function(){socket.emit('leave');show('home')};
+$('stop').onclick=function(){socket.emit('leave');reset();if(local){local.getTracks().forEach(function(t){t.stop()});local=null;$('vid').classList.add('hide')}show('home')};
+$('next').onclick=function(){socket.emit('next');reset();join()};
+$('report').onclick=function(){socket.emit('report','user report');reset();join()};
+function send(){var t=$('inp').value.trim();if(!t)return;$('inp').value='';socket.emit('message',t);bubble(t,true)}
+$('send').onclick=send;
+$('inp').addEventListener('keydown',function(e){if(e.key==='Enter')send()});
+function tog(k,b){if(!local)return;var t=k==='a'?local.getAudioTracks()[0]:local.getVideoTracks()[0];if(t){t.enabled=!t.enabled;b.style.opacity=t.enabled?1:.4}}
+$('mic').onclick=function(){tog('a',this)};$('cam').onclick=function(){tog('v',this)};
+</script></body></html>
